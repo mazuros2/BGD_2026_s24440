@@ -45,13 +45,13 @@ Pipeline jest orkiestrowany przez Apache Airflow przy użyciu DAGa z pięcioma k
 ### Task 1 — bronze_load
 PySpark wczytuje plik CSV i zapisuje wszystkie wiersze do bronze.request_raw bez żadnych transformacji. Wszystkie 44 kolumny są przechowywane jako tekst. Task używa mode("append") — baza danych automatycznie odrzuca duplikaty jeśli unique_key jest kluczem głównym.
 ### Task 2 — silver_transform
-PySpark czyta dane z bronze.request_raw, stosuje wszystkie transformacje czyszczące i typujące w pamięci RAM, a następnie zapisuje wynik do silver.request_cleaned. Deduplikacja jest realizowana wzorcem Window + row_number(), który odpowiada DISTINCT ON z PostgreSQL.
+PySpark czyta dane z bronze.request_raw, stosuje wszystkie transformacje czyszczące i typujące w pamięci RAM, a następnie zapisuje wynik do silver.request_cleaned.
 ### Task 3 — gold_tables
 PySpark buduje wszystkie pięć tabel wymiarów z silver.request_cleaned i zapisuje je do schematu gold: gold.date, gold.agency, gold.location, gold.complaint oraz gold.status. Tabela gold.status używa ON CONFLICT DO NOTHING aby uniknąć duplikatów przy kolejnych uruchomieniach pipeline'u.
 ### Task 4 — gold_requests_table
 PySpark czyta silver.request_cleaned oraz wszystkie pięć poprzednich stworzonych tabel, wykonuje LEFT JOINy aby rozwiązać klucze obce, oblicza resolution_hours i zapisuje gold.requests.
 ### Task 5 — gold_aggregations
-PySpark czyta tabelę aby zbudować dwie tabele agregacji: gold.aggregation_complaint_by_year (trendy skarg w czasie) oraz gold.aggregation_channel_by_borough (kanały zgłoszeń per dzielnica z procentowym udziałem).
+PySpark czyta tabelę aby zbudować dwie tabele agregacji: gold.aggregation_complaint_by_year (trendy skarg w czasie) oraz gold.aggregation_channel_by_borough (kanały zgłoszeń na dzielnica z procentowym udziałem).
 
 # 8. Obrazy dockerowe
 Postanowiłem wykorzystać obrazy dockerowe aby ułatwić uruchomienie projektu na róźnych środowiskach bez koniecznosci  pobierania PostgreSQL czy Apache Airflow (i też chciałem zadbać o pamięć na laptopie).
