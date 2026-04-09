@@ -36,8 +36,9 @@ Dane są czyszczone, rzutowane na właściwe typy i walidowane przez PySpark. Ta
 ### Gold - godtowe do analizy
 Dane zostały rozdzielone do innych tabel aby ułatwić raporty i dashboardy.
 
-
 # 6. Diagram pipeline'u
+
+![pipeline](https://github.com/user-attachments/assets/79dbceca-3d86-4fd2-b0a1-9a5ae5824a2e)
 
 # 7. Architektura pipeline'u
 Pipeline jest orkiestrowany przez Apache Airflow przy użyciu DAGa z pięcioma kolejnymi taskami. Każdy task musi zakończyć się sukcesem zanim następny się uruchomi w przeciwnym razie pipeline upada. Taski są następujące:
