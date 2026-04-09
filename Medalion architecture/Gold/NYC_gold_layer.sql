@@ -55,8 +55,7 @@ FROM silver.request_cleaned
 WHERE borough IS NOT NULL
   AND borough != 'UNSPECIFIED'
 GROUP BY borough, incident_zip, city;
- 
-DROP TABLE IF EXISTS gold.complaint;
+
 
 CREATE TABLE gold.complaint AS
 SELECT

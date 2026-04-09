@@ -1,0 +1,103 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: nyc_311_postgres
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init_sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      interval: 10s
+      retries: 5
+
+  airflow_postgres:
+    image: postgres:15
+    container_name: nyc_311_airflow_db
+    environment:
+      POSTGRES_USER:     airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB:       airflow
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+
+  airflow_init:
+    build: .
+    container_name: nyc_311_airflow_init
+    depends_on:
+      airflow_postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_postgres/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__WEBSERVER__SECRET_KEY: "nyc311secretkey"
+    command: bash -c "airflow db migrate && airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email airflow@airflow.com"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./spark:/opt/airflow/spark
+      - ./data:/opt/airflow/data
+      - ./.env:/opt/airflow/.env
+
+  airflow_scheduler:
+    build: .
+    container_name: nyc_311_airflow_scheduler
+    depends_on:
+      airflow_postgres:
+        condition: service_healthy
+      airflow_init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_postgres/airflow
+      AIRFLOW__CORE__EXECUTOR:             LocalExecutor
+      AIRFLOW__WEBSERVER__SECRET_KEY:      "nyc311secretkey"
+      POSTGRES_HOST:     postgres
+      POSTGRES_PORT:     ${POSTGRES_PORT}
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./spark:/opt/airflow/spark
+      - ./data:/opt/airflow/data
+      - ./.env:/opt/airflow/.env
+    command: scheduler
+    restart: unless-stopped
+
+  airflow_webserver:
+    build: .
+    container_name: nyc_311_airflow_webserver
+    depends_on:
+      airflow_postgres:
+        condition: service_healthy
+      airflow_init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_postgres/airflow
+      AIRFLOW__CORE__EXECUTOR:             LocalExecutor
+      POSTGRES_HOST:     postgres
+      POSTGRES_PORT:     ${POSTGRES_PORT}
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./spark:/opt/airflow/spark
+      - ./data:/opt/airflow/data
+      - ./.env:/opt/airflow/.env
+    command: webserver
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  airflow_db_data:
