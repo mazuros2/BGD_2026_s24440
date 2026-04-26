@@ -1,8 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
-from db_config import POSTGRES_URL, POSTGRES_PROPS
-from spark.db_config import BRONZE_TABLE, SILVER_TABLE
+from db_config import POSTGRES_URL, POSTGRES_PROPS, BRONZE_TABLE, SILVER_TABLE
 
 DATE_FORMAT = "MM/dd/yyyy hh:mm:ss a"
 

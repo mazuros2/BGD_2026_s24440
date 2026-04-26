@@ -21,9 +21,18 @@ POSTGRES_PROPS = {
 }
 
 DB_CONFIG = {
-    "host":     POSTGRES_HOST,
+    "host":     os.getenv("POSTGRES_HOST"),
     "port":     os.getenv("POSTGRES_PORT"),
     "dbname":   os.getenv("POSTGRES_DB"),
     "user":     os.getenv("POSTGRES_USER"),
     "password": os.getenv("POSTGRES_PASSWORD"),
 }
+
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "nyc_311_raw")
+
+CSV_PATH = os.getenv("CSV_PATH", "/opt/airflow/data/311_nyc_requests.csv")
+
+BATCH_FLAG = "batch"
+KAFKA_FLAG = "kafka"
+FEATURE_FLAG = os.getenv("FEATURE_FLAG", "kafka")

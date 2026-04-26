@@ -38,34 +38,60 @@ Dane zostały rozdzielone do innych tabel aby ułatwić raporty i dashboardy.
 
 # 6. Diagram pipeline'u
 
-![pipeline](https://github.com/user-attachments/assets/79dbceca-3d86-4fd2-b0a1-9a5ae5824a2e)
+## Batch pipeline
 
-# 7. Architektura pipeline'u
-Pipeline jest orkiestrowany przez Apache Airflow przy użyciu DAGa z pięcioma kolejnymi taskami. Każdy task musi zakończyć się sukcesem zanim następny się uruchomi w przeciwnym razie pipeline upada. Taski są następujące:
-### Task 1 — bronze_load
-PySpark wczytuje plik CSV i zapisuje wszystkie wiersze do bronze.request_raw bez żadnych transformacji. Wszystkie 44 kolumny są przechowywane jako tekst. Task używa mode("append") — baza danych automatycznie odrzuca duplikaty jeśli unique_key jest kluczem głównym.
-### Task 2 — silver_transform
-PySpark czyta dane z bronze.request_raw, stosuje wszystkie transformacje czyszczące i typujące w pamięci RAM, a następnie zapisuje wynik do silver.request_cleaned.
-### Task 3 — gold_tables
-PySpark buduje wszystkie pięć tabel wymiarów z silver.request_cleaned i zapisuje je do schematu gold: gold.date, gold.agency, gold.location, gold.complaint oraz gold.status. Tabela gold.status używa ON CONFLICT DO NOTHING aby uniknąć duplikatów przy kolejnych uruchomieniach pipeline'u.
-### Task 4 — gold_requests_table
-PySpark czyta silver.request_cleaned oraz wszystkie pięć poprzednich stworzonych tabel, wykonuje LEFT JOINy aby rozwiązać klucze obce, oblicza resolution_hours i zapisuje gold.requests.
-### Task 5 — gold_aggregations
-PySpark czyta tabelę aby zbudować dwie tabele agregacji: gold.aggregation_complaint_by_year (trendy skarg w czasie) oraz gold.aggregation_channel_by_borough (kanały zgłoszeń na dzielnica z procentowym udziałem).
+## Kafka pipeline
 
-# 8. Obrazy dockerowe
-Postanowiłem wykorzystać obrazy dockerowe aby ułatwić uruchomienie projektu na róźnych środowiskach bez koniecznosci  pobierania PostgreSQL czy Apache Airflow (i też chciałem zadbać o pamięć na laptopie).
-W projekcie jest Dockerfile i Docker-compose.yml.
-Dockerfile bierze oficjalny obraz Airflow i dopisuje do niego instalację Javy i PySpark.
-docker-compose.yml buduje 4 kontenery: 
-### Postgres - nyc_311_postgres
-Główna baza danych projektu. Przechowuje dane we wszystkich trzech warstwach (bronze, silver, gold). Skrypty SQL z folderu init_sql/ są wykonywane automatycznie przy pierwszym uruchomieniu, tworząc wszystkie schematy i tabele.
-### Airflow db - nyc_311_airflow_db 
-Osobna baza danych używana wyłącznie przez Airflow do przechowywania własnych metadanych
-### Airflow scheduler - nyc_311_airflow_scheduler
-Uruchamia harmonogram zadań Airflow i monitoruje ich wykonanie. Odpowiada za uruchamianie tasków.
-### Airflow webserver - nyc_311_airflow_webserver
-Udostępnia interfejs użytkownika Airflow, gdzie można monitorować DAGi, przeglądać logi i ręcznie uruchamiać taski. Jest dostępny na porcie 8080.
+
+
+
+## 7. Architektura pipeline'u
+
+Pipeline jest orkiestrowany przez Apache Airflow przy użyciu DAGa. Liczba tasków zależy od wartości `FEATURE_FLAG` w pliku `.env`:
+Tryb batch służy do jednorazowego załadowania dużego zbioru danych historycznych (np. cały CSV 3GB na raz). Tryb kafka służy do ładowania przyrostowego — dane trafiają do kolejki i pipeline uruchamia się gdy KafkaSensor wykryje nowe wiadomości. Oba tryby używają tego samego kodu silver i gold — zmienia się tylko źródło danych w warstwie bronze.
+
+Zmiana trybu wymaga edycji `FEATURE_FLAG` w `.env` i restartu kontenerów (`docker-compose down && docker-compose up -d`).
+
+Każdy task musi zakończyć się sukcesem zanim następny się uruchomi — w przeciwnym razie pipeline upada. DAG jest uruchamiany ręcznie przez użytkownika w Airflow UI.
+
+### Task — kafka_produce _(tylko tryb kafka)_
+Producer wczytuje plik CSV wiersz po wierszu i wysyła każdy wiersz jako wiadomość JSON do topicu `nyc_311_raw` w Apache Kafka. Klucz wiadomości to `unique_key` co gwarantuje że ten sam rekord zawsze trafia do tej samej partycji. Topic ma 3 partycje i retencję 7 dni.
+
+### Task — wait_for_kafka_messages _(tylko tryb kafka)_
+KafkaSensor nasłuchuje topicu `nyc_311_raw` i blokuje pipeline dopóki nie wykryje wiadomości. Sprawdza liczbę wiadomości w partycjach co 15 sekund. Dzięki temu pipeline nie przechodzi do bronze dopóki producent nie skończy wysyłać danych.
+
+### Task — bronze_load
+W trybie kafka PySpark czyta wiadomości z Kafki (`spark.read.format("kafka")`), automatycznie wykrywa schemat JSON z próbki 1000 wiadomości, rozpakuje JSON do kolumn i nadpisuje nazwy kolumn na ustandaryzowane. 
+
+W trybie batch PySpark czyta CSV bezpośrednio z dysku. W obu trybach wszystkie 44 kolumny są przechowywane jako tekst bez żadnych transformacji.
+
+### Task — silver_transform
+PySpark czyta dane z `bronze.request_raw`, stosuje wszystkie transformacje czyszczące i typujące w pamięci RAM, a następnie zapisuje wynik do `silver.request_cleaned`.
+
+### Task — gold_tables
+PySpark buduje wszystkie pięć tabel wymiarów z `silver.request_cleaned` i zapisuje je do schematu gold: `gold.date`, `gold.agency`, `gold.location`, `gold.complaint` oraz `gold.status`. Tabela `gold.status` używa `ON CONFLICT DO NOTHING` aby uniknąć duplikatów przy kolejnych uruchomieniach pipeline'u.
+
+### Task — gold_requests_table
+PySpark czyta `silver.request_cleaned` oraz wszystkie pięć poprzednich stworzonych tabel, wykonuje LEFT JOINy aby rozwiązać klucze obce, oblicza `resolution_hours` i zapisuje `gold.requests`.
+
+### Task — gold_aggregations
+PySpark czyta tabelę faktów aby zbudować dwie tabele agregacji: `gold.aggregation_complaint_by_year` (trendy skarg w czasie) oraz `gold.aggregation_channel_by_borough` (kanały zgłoszeń na dzielnicę z procentowym udziałem).
+
+## 8. Obrazy dockerowe
+Postanowiłem wykorzystać obrazy dockerowe aby ułatwić uruchomienie projektu na różnych środowiskach bez konieczności pobierania PostgreSQL czy Apache Airflow (i też chciałem zadbać o pamięć na laptopie).
+W projekcie jest `Dockerfile` i `docker-compose.yml`. Dockerfile bierze oficjalny obraz Airflow i dopisuje do niego instalację Javy, PySpark (`3.5.0`), kafka-python oraz sterowniki JDBC. docker-compose.yml buduje 6 kontenerów:
+### Postgres — nyc_311_postgres
+Główna baza danych projektu. Przechowuje dane we wszystkich trzech warstwach (bronze, silver, gold). Skrypty SQL z folderu `init_sql/` są wykonywane automatycznie przy pierwszym uruchomieniu, tworząc wszystkie schematy i tabele. Dostępny na porcie 5433.
+### Airflow DB — nyc_311_airflow_db
+Osobna baza danych używana wyłącznie przez Airflow do przechowywania własnych metadanych.
+### Apache Kafka — nyc_311_kafka
+Broker Kafki (`apache/kafka:3.7.0`) działający w trybie KRaft (bez zookeepera). Trzyma wiadomości w topicu `nyc_311_raw`. Dostępny wewnątrz sieci Docker pod adresem `kafka:9092` oraz pod `localhost:9094`.
+### Kafka UI — nyc_311_kafka_ui
+Interfejs webowy do podglądu Kafki (`http://localhost:8090`). Pokazuje topici, wiadomości w partycjach i offsety konsumentów. Przydatny do weryfikacji czy producent wysłał dane.
+### Airflow Scheduler — nyc_311_airflow_scheduler
+Uruchamia harmonogram zadań Airflow i monitoruje ich wykonanie. Odpowiada za uruchamianie tasków. Czeka na Kafkę przed startem. Czyta `FEATURE_FLAG` ze zmiennych środowiskowych aby zdecydować czy DAG zawiera taski Kafki czy nie.
+### Airflow Webserver — nyc_311_airflow_webserver
+Udostępnia interfejs użytkownika Airflow (`http://localhost:8080`), gdzie można monitorować DAGi, przeglądać logi i ręcznie uruchamiać taski.
 
 # 9. Instalacja i uruchomienie projektu
 ### Wymagania:
@@ -81,6 +107,10 @@ POSTGRES_PORT=5432
 POSTGRES_DB=postgres
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
+KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+KAFKA_TOPIC=nyc_311_raw
+CSV_PATH=/opt/airflow/data/311_nyc_requests.csv
+FEATURE_FLAG=kafka #2 flagi: batch / kafka
 ```
 4. Uruchom docker-compose:
 ```
@@ -91,9 +121,10 @@ docker-compose up -d --build
 docker-compose ps
 ```
 6. Airflow webserver będzie dostępny pod adresem http://localhost:8080
-7. Zaloguj się do Airflow (domyślne dane logowania to airflow/airflow) i znajdź DAG o nazwie "nyc_311_pipeline". Możesz go uruchomić ręcznie.
-8. Po uruchomieniu pipeline'u możesz monitorować postęp poszczególnych tasków w interfejsie Airflow. Po zakończeniu pipeline'u dane będą dostępne w bazie danych PostgreSQL w schemacie gold do dalszej analizy i raportowania.
-9. Aby zatrzymać kontenery, użyj:
+7. Kafka UI jest dostępna pod adresem http://localhost:8090 i nie wymaga logowania 
+8. Zaloguj się do Airflow (domyślne dane logowania to airflow/airflow) i znajdź DAG o nazwie "nyc_311_pipeline". Możesz go uruchomić ręcznie.
+9. Po uruchomieniu pipeline'u możesz monitorować postęp poszczególnych tasków w interfejsie Airflow. Po zakończeniu pipeline'u dane będą dostępne w bazie danych PostgreSQL w schemacie gold do dalszej analizy i raportowania.
+10. Aby zatrzymać kontenery, użyj:
 ```
 docker-compose down
 ```

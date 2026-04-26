@@ -30,6 +30,40 @@ services:
       interval: 10s
       retries: 5
 
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: nyc_311_kafka
+    environment:
+      KAFKA_NODE_ID: 0
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CLUSTER_ID: nyc311cluster
+    ports:
+      - "9094:9094"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  kafka_ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: nyc_311_kafka_ui
+    depends_on:
+      kafka:
+        condition: service_started
+    environment:
+      KAFKA_CLUSTERS_0_NAME: nyc311
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "8090:8080"
+    restart: unless-stopped
+
   airflow_init:
     build: .
     container_name: nyc_311_airflow_init
@@ -44,6 +78,7 @@ services:
     volumes:
       - ./dags:/opt/airflow/dags
       - ./spark:/opt/airflow/spark
+      - ./kafka:/opt/airflow/kafka
       - ./data:/opt/airflow/data
       - ./.env:/opt/airflow/.env
 
@@ -55,6 +90,8 @@ services:
         condition: service_healthy
       airflow_init:
         condition: service_completed_successfully
+      kafka:
+        condition: service_started
     environment:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_postgres/airflow
       AIRFLOW__CORE__EXECUTOR:             LocalExecutor
@@ -64,9 +101,13 @@ services:
       POSTGRES_DB:       ${POSTGRES_DB}
       POSTGRES_USER:     ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: nyc_311_raw
+      FEATURE_FLAG: ${FEATURE_FLAG:-kafka}
     volumes:
       - ./dags:/opt/airflow/dags
       - ./spark:/opt/airflow/spark
+      - ./kafka:/opt/airflow/kafka
       - ./data:/opt/airflow/data
       - ./.env:/opt/airflow/.env
     command: scheduler
@@ -88,11 +129,15 @@ services:
       POSTGRES_DB:       ${POSTGRES_DB}
       POSTGRES_USER:     ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: nyc_311_raw
+      FEATURE_FLAG: ${FEATURE_FLAG:-kafka}
     ports:
       - "8080:8080"
     volumes:
       - ./dags:/opt/airflow/dags
       - ./spark:/opt/airflow/spark
+      - ./kafka:/opt/airflow/kafka
       - ./data:/opt/airflow/data
       - ./.env:/opt/airflow/.env
     command: webserver
@@ -101,3 +146,4 @@ services:
 volumes:
   postgres_data:
   airflow_db_data:
+  kafka_data:

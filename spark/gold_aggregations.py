@@ -1,9 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
-from db_config import POSTGRES_URL, POSTGRES_PROPS
-from spark.db_config import SILVER_TABLE
-
+from db_config import POSTGRES_URL, POSTGRES_PROPS, SILVER_TABLE
 
 def run_gold_aggregations(spark, df_requests_table, df_complaint, df_date, df_location, df_silver):
 

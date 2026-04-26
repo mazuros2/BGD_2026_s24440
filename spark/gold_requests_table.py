@@ -1,7 +1,6 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from db_config import POSTGRES_URL, POSTGRES_PROPS
-from spark.db_config import SILVER_TABLE
+from db_config import POSTGRES_URL, POSTGRES_PROPS, SILVER_TABLE
 
 def run_gold_requests_table(spark, df_silver, df_agency, df_location, df_complaint, df_status):
     df_requests_table = (
