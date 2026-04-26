@@ -39,9 +39,10 @@ Dane zostały rozdzielone do innych tabel aby ułatwić raporty i dashboardy.
 # 6. Diagram pipeline'u
 
 ## Batch pipeline
+<img width="751" height="152" alt="Batch-Pipeline" src="https://github.com/user-attachments/assets/8a226c45-4add-4970-9552-6970f1ce065e" />
 
 ## Kafka pipeline
-
+<img width="1021" height="142" alt="Kafka-Pipeline" src="https://github.com/user-attachments/assets/3a7dd5a9-a15d-438b-b90e-ec097be607b7" />
 
 
 
