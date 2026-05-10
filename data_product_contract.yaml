@@ -1,0 +1,559 @@
+domain: nyc-services
+dataProduct: nyc-311-service-requests-analytics
+version: 1.0.0
+status: active
+
+kind: DataContract
+apiVersion: v3.1.0
+
+contractCreatedTs: "2026-05-07T00:00:00+00:00"
+
+description:
+  purpose: >
+    Analysis of NYC 311 service requests from 2010-2019 to identify
+    which city agencies have the longest resolution times, which complaint
+    types dominate in specific boroughs, and how request volumes changed
+    over time. Supports resource allocation and budget planning decisions.
+  limitations: >
+    Historical data only (2010-2019), not updated in real-time.
+    Approximately 8% of rows have borough = Unspecified and are excluded
+    from geographic analysis. Rows with closed_date < created_date are
+    filtered out in the silver layer. In Kafka mode, producer sends
+    a maximum of 50,000 rows due to memory constraints.
+  usage: >
+    Analyze agency performance, identify complaint trends by borough
+    and year, compare resolution times across complaint types.
+
+tenant: PJATK-BGD
+
+team:
+  name: bgd-s24440
+  members:
+    - username: mazuros2
+      role: Owner
+      description: Student project — BGD 2026
+      dateIn: "2026-03-22"
+
+authoritativeDefinitions:
+  - type: businessDefinition
+    url: https://catalog.data.gov/dataset/311-service-requests-from-2010-to-2019
+    description: Original dataset from NYC Open Data via data.gov
+  - type: repositoryDefinition
+    url: https://github.com/mazuros2/BGD_2026_s24440
+    description: Git repository with full pipeline code
+
+servers:
+  - server: nyc-311-postgres
+    type: postgres
+    host: localhost
+    port: 5433
+    database: postgres
+    schema: gold
+    description: >
+      PostgreSQL 15 running in Docker. Access via psql or any JDBC client.
+      Default credentials: postgres / postgres (dev environment only).
+
+schema:
+
+  - id: fact_requests
+    name: requests
+    physicalName: requests
+    physicalType: table
+    businessName: Service Requests Fact Table
+    description: >
+      One row per NYC 311 service request. Contains foreign keys
+      to five tables and the calculated resolution time.
+    tags: ['fact', 'requests', '311']
+    dataGranularityDescription: One row per unique service request
+    properties:
+      - id: request_id
+        name: request_id
+        primaryKey: true
+        primaryKeyPosition: 1
+        businessName: Request ID
+        logicalType: integer
+        physicalType: BIGINT
+        required: true
+        description: Unique identifier of the service request
+        classification: public
+      - id: date_key
+        name: date_key
+        primaryKey: false
+        businessName: Date Key
+        logicalType: integer
+        physicalType: INT
+        required: false
+        description: Foreign key to gold.date
+        relationships:
+          - to: date.date_key
+            type: foreignKey
+      - id: agency_key
+        name: agency_key
+        primaryKey: false
+        businessName: Agency Key
+        logicalType: integer
+        physicalType: BIGINT
+        required: false
+        description: Foreign key to gold.agency
+        relationships:
+          - to: agency.agency_key
+            type: foreignKey
+      - id: location_key
+        name: location_key
+        primaryKey: false
+        businessName: Location Key
+        logicalType: integer
+        physicalType: BIGINT
+        required: false
+        description: Foreign key to gold.location. NULL when borough is Unspecified.
+        relationships:
+          - to: location.location_key
+            type: foreignKey
+      - id: complaint_key
+        name: complaint_key
+        primaryKey: false
+        businessName: Complaint Key
+        logicalType: integer
+        physicalType: BIGINT
+        required: false
+        description: Foreign key to gold.complaint
+        relationships:
+          - to: complaint.complaint_key
+            type: foreignKey
+      - id: status_key
+        name: status_key
+        primaryKey: false
+        businessName: Status Key
+        logicalType: integer
+        physicalType: INT
+        required: false
+        description: Foreign key to gold.status
+        relationships:
+          - to: status.status_key
+            type: foreignKey
+      - id: resolution_hours
+        name: resolution_hours
+        primaryKey: false
+        businessName: Resolution Hours
+        logicalType: integer
+        physicalType: INT
+        required: false
+        description: Time to resolve the request in hours. NULL if request is still open.
+        classification: public
+
+    quality:
+      - metric: rowCount
+        mustBeGreaterThan: 0
+        description: Fact table must contain data after pipeline run
+        severity: error
+        schedule: after each pipeline run
+
+  - id: gold_date
+    name: date
+    physicalName: date
+    physicalType: table
+    businessName: Date Table
+    description: Calendar attributes derived from request created_date
+    tags: ['date', 'calendar']
+    properties:
+      - id: date_key
+        name: date_key
+        primaryKey: true
+        primaryKeyPosition: 1
+        businessName: Date Key
+        logicalType: integer
+        physicalType: INT
+        required: true
+        description: Date key in YYYYMMDD format
+      - id: full_date
+        name: full_date
+        businessName: Full Date
+        logicalType: date
+        physicalType: DATE
+        required: true
+        description: Full calendar date
+      - id: year
+        name: year
+        businessName: Year
+        logicalType: integer
+        physicalType: INT
+        required: true
+        description: Year (2010-2019)
+      - id: month
+        name: month
+        businessName: Month
+        logicalType: integer
+        physicalType: INT
+        required: true
+        description: Month number (1-12)
+      - id: quarter
+        name: quarter
+        businessName: Quarter
+        logicalType: integer
+        physicalType: INT
+        required: true
+        description: Quarter (1-4)
+      - id: day_of_week
+        name: day_of_week
+        businessName: Day of Week
+        logicalType: string
+        physicalType: TEXT
+        required: true
+        description: Day name (Monday, Tuesday, ...)
+      - id: is_weekend
+        name: is_weekend
+        businessName: Is Weekend
+        logicalType: boolean
+        physicalType: BOOLEAN
+        required: true
+        description: Whether the date falls on Saturday or Sunday
+      - id: season
+        name: season
+        businessName: Season
+        logicalType: string
+        physicalType: TEXT
+        required: true
+        description: Season (Winter, Spring, Summer, Fall)
+
+  - id: gold_agency
+    name: agency
+    physicalName: agency
+    physicalType: table
+    businessName: Agency Table
+    description: NYC city agencies that handle 311 service requests
+    tags: ['agency']
+    properties:
+      - id: agency_key
+        name: agency_key
+        primaryKey: true
+        primaryKeyPosition: 1
+        businessName: Agency Key
+        logicalType: integer
+        physicalType: BIGINT
+        required: true
+        description: Surrogate key for agency
+      - id: agency_code
+        name: agency_code
+        businessName: Agency Code
+        logicalType: string
+        physicalType: TEXT
+        required: true
+        description: Short agency code (e.g. NYPD, DSNY, HPD)
+      - id: agency_name
+        name: agency_name
+        businessName: Agency Name
+        logicalType: string
+        physicalType: TEXT
+        required: true
+        description: Full agency name
+      - id: agency_type
+        name: agency_type
+        businessName: Agency Type
+        logicalType: string
+        physicalType: TEXT
+        required: false
+        description: Categorized agency type
+
+  - id: gold_location
+    name: location
+    physicalName: location
+    physicalType: table
+    businessName: Location Table
+    description: Geographic location of service requests. Excludes borough = Unspecified.
+    tags: ['location', 'geography']
+    properties:
+      - id: location_key
+        name: location_key
+        primaryKey: true
+        primaryKeyPosition: 1
+        businessName: Location Key
+        logicalType: integer
+        physicalType: BIGINT
+        required: true
+        description: Surrogate key for location
+      - id: borough
+        name: borough
+        businessName: Borough
+        logicalType: string
+        physicalType: TEXT
+        required: true
+        description: NYC borough (Manhattan, Brooklyn, Queens, Bronx, Staten Island)
+      - id: incident_zip
+        name: incident_zip
+        businessName: ZIP Code
+        logicalType: string
+        physicalType: TEXT
+        required: false
+        description: ZIP code of the incident
+      - id: city
+        name: city
+        businessName: City
+        logicalType: string
+        physicalType: TEXT
+        required: false
+        description: City name
+      - id: latitude
+        name: latitude
+        businessName: Latitude
+        logicalType: decimal
+        physicalType: NUMERIC
+        required: false
+        description: Latitude coordinate. NULL if original value was 0.
+      - id: longitude
+        name: longitude
+        businessName: Longitude
+        logicalType: decimal
+        physicalType: NUMERIC
+        required: false
+        description: Longitude coordinate. NULL if original value was 0.
+
+  - id: gold_complaint
+    name: complaint
+    physicalName: complaint
+    physicalType: table
+    businessName: Complaint Type Table
+    description: Types of complaints grouped into categories
+    tags: ['complaint']
+    properties:
+      - id: complaint_key
+        name: complaint_key
+        primaryKey: true
+        primaryKeyPosition: 1
+        businessName: Complaint Key
+        logicalType: integer
+        physicalType: BIGINT
+        required: true
+        description: Surrogate key for complaint type
+      - id: complaint_type
+        name: complaint_type
+        businessName: Complaint Type
+        logicalType: string
+        physicalType: TEXT
+        required: true
+        description: Specific complaint type (e.g. Noise - Residential, Heat/Hot Water)
+      - id: category
+        name: category
+        businessName: Category
+        logicalType: string
+        physicalType: TEXT
+        required: false
+        description: High-level complaint category
+
+  - id: gold_status
+    name: status
+    physicalName: status
+    physicalType: table
+    businessName: Status Table
+    description: Fixed lookup table with 6 possible request statuses
+    tags: ['status', 'lookup']
+    properties:
+      - id: status_key
+        name: status_key
+        primaryKey: true
+        primaryKeyPosition: 1
+        businessName: Status Key
+        logicalType: integer
+        physicalType: INT
+        required: true
+        description: Status key (1-6)
+      - id: status_code
+        name: status_code
+        businessName: Status Code
+        logicalType: string
+        physicalType: VARCHAR(50)
+        required: true
+        description: Status code (CLOSED, OPEN, PENDING, IN PROGRESS, ASSIGNED, UNSPECIFIED)
+      - id: status_label
+        name: status_label
+        businessName: Status Label
+        logicalType: string
+        physicalType: VARCHAR(100)
+        required: true
+        description: Human-readable status label
+      - id: is_resolved
+        name: is_resolved
+        businessName: Is Resolved
+        logicalType: boolean
+        physicalType: BOOLEAN
+        required: true
+        description: Whether the request has been resolved
+      - id: is_pending
+        name: is_pending
+        businessName: Is Pending
+        logicalType: boolean
+        physicalType: BOOLEAN
+        required: true
+        description: Whether the request is still pending
+
+  - id: agg_complaint_by_year
+    name: aggregation_complaint_by_year
+    physicalName: aggregation_complaint_by_year
+    physicalType: table
+    businessName: Complaint Trends by Year
+    description: Request count and average resolution time per complaint type per year
+    tags: ['aggregation', 'trends']
+    properties:
+      - id: agg_category
+        name: category
+        businessName: Category
+        logicalType: string
+        physicalType: TEXT
+        description: Complaint category
+      - id: agg_complaint_type
+        name: complaint_type
+        businessName: Complaint Type
+        logicalType: string
+        physicalType: TEXT
+        description: Specific complaint type
+      - id: agg_year
+        name: year
+        businessName: Year
+        logicalType: integer
+        physicalType: INT
+        description: Year
+      - id: agg_request_count
+        name: request_count
+        businessName: Request Count
+        logicalType: integer
+        physicalType: BIGINT
+        description: Number of requests
+      - id: agg_avg_resolution
+        name: avg_resolution_hours
+        businessName: Average Resolution Hours
+        logicalType: decimal
+        physicalType: NUMERIC
+        description: Average time to resolve in hours
+
+  # ----------------------------------------------------------
+  # gold.aggregation_channel_by_borough
+  # ----------------------------------------------------------
+  - id: agg_channel_by_borough
+    name: aggregation_channel_by_borough
+    physicalName: aggregation_channel_by_borough
+    physicalType: table
+    businessName: Channel Usage by Borough
+    description: Request count and percentage share per channel per borough
+    tags: ['aggregation', 'channels']
+    properties:
+      - id: agg_borough
+        name: borough
+        businessName: Borough
+        logicalType: string
+        physicalType: TEXT
+        description: NYC borough
+      - id: agg_channel
+        name: channel
+        businessName: Channel
+        logicalType: string
+        physicalType: TEXT
+        description: Submission channel (PHONE, ONLINE, MOBILE, OTHER)
+      - id: agg_ch_request_count
+        name: request_count
+        businessName: Request Count
+        logicalType: integer
+        physicalType: BIGINT
+        description: Number of requests
+      - id: agg_pct
+        name: pct_of_borough_total
+        businessName: Percentage of Borough Total
+        logicalType: decimal
+        physicalType: NUMERIC
+        description: Percentage share of channel within borough
+
+quality:
+  - metric: completeness_agency_key
+    description: Percentage of rows in gold.requests with non-null agency_key
+    currentValue: 100.00
+    mustBeGreaterThan: 98
+    unit: percent
+    dimension: completeness
+    severity: error
+    schedule: after each pipeline run
+
+  - metric: completeness_location_key
+    description: Percentage of rows in gold.requests with non-null location_key
+    currentValue: 97.48
+    mustBeGreaterThan: 90
+    unit: percent
+    dimension: completeness
+    severity: warning
+    schedule: after each pipeline run
+    note: >
+      ~2.5% of rows have borough = Unspecified and are excluded
+      from the location dimension, resulting in NULL location_key.
+
+  - metric: completeness_date_key
+    description: Percentage of rows in gold.requests with non-null date_key
+    currentValue: 96.99
+    mustBeGreaterThan: 95
+    unit: percent
+    dimension: completeness
+    severity: warning
+    schedule: after each pipeline run
+
+  - metric: validity_resolution_hours
+    description: Percentage of rows where resolution_hours >= 0 (excluding NULLs)
+    currentValue: 100.00
+    mustBe: 100
+    unit: percent
+    dimension: validity
+    severity: error
+    schedule: after each pipeline run
+    note: >
+      Rows with closed_date < created_date are filtered in the silver layer,
+      so negative resolution_hours never reach the gold layer.
+
+  - metric: consistency_borough
+    description: Percentage of rows with borough matching 5 official NYC boroughs
+    currentValue: 100.00
+    mustBe: 100
+    unit: percent
+    dimension: consistency
+    severity: error
+    schedule: after each pipeline run
+    note: >
+      Only rows with valid borough (Manhattan, Brooklyn, Queens, Bronx,
+      Staten Island) are included in the location dimension.
+
+customProperties:
+  - property: exampleQuery1
+    value: |
+      -- Top 10 agencies with longest average resolution time
+      SELECT
+          a.agency_code,
+          a.agency_name,
+          COUNT(*) AS total_requests,
+          ROUND(AVG(r.resolution_hours)) AS avg_hours
+      FROM gold.requests r
+      JOIN gold.agency a ON r.agency_key = a.agency_key
+      WHERE r.resolution_hours IS NOT NULL
+      GROUP BY a.agency_code, a.agency_name
+      ORDER BY avg_hours DESC
+      LIMIT 10;
+
+  - property: exampleQuery2
+    value: |
+      -- Request count per borough per year
+      SELECT
+          l.borough,
+          d.year,
+          COUNT(*) AS request_count
+      FROM gold.requests r
+      JOIN gold.location l ON r.location_key = l.location_key
+      JOIN gold.date d ON r.date_key = d.date_key
+      GROUP BY l.borough, d.year
+      ORDER BY l.borough, d.year;
+
+  - property: exampleQuery3
+    value: |
+      -- Top 10 complaint types in Brooklyn
+      SELECT
+          c.complaint_type,
+          COUNT(*) AS total
+      FROM gold.requests r
+      JOIN gold.complaint c ON r.complaint_key = c.complaint_key
+      JOIN gold.location l ON r.location_key = l.location_key
+      WHERE l.borough = 'BROOKLYN'
+      GROUP BY c.complaint_type
+      ORDER BY total DESC
+      LIMIT 10;
